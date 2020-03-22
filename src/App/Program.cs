@@ -11,14 +11,21 @@ namespace App
     {
         public static void Main()
         {
-            var result = Execute(x => x.AddEnrollment(1, 2, Grade.A));
-            result =  Execute(x => x.CheckStudentFavoriteCourse(1, 2));
+            //var result5 = Execute(x => x.RegisterStudent("Diego", "dcvieira@email.com", 1));
+            var result4 = Execute(x => x.EditPersonalInfo(4, "Diego Camilo", "Martins Viera 3", 2, "dcvieira2@email.com.br", 1));
+
+            // var result3 = Execute(x => x.DisenrollStudent(1, 2));
+            // var result2 = Execute(x => x.EnrollStudent(1, 2, Grade.A));
+            // var result1 = Execute(x => x.CheckStudentFavoriteCourse(1, 2));
         }
 
         private static string Execute(Func<StudentController, string> func)
         {
             string connectionString = GetConnectionString();
-            using (var context = new SchoolContext(connectionString, useConsoleLogger: true))
+
+            var bus = new MessageBus(new Bus());
+            EventDispatcher dispatcher = new EventDispatcher(bus);
+            using (var context = new SchoolContext(connectionString, useConsoleLogger: true, dispatcher))
             {
                 var controller = new StudentController(context);
                 return func(controller);

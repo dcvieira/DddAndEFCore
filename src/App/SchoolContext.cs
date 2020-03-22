@@ -1,19 +1,25 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.Logging;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace App
 {
     public sealed class SchoolContext : DbContext
     {
-        private readonly bool _useConsoleLogger;
-
+        private static readonly Type[] EnumerationTypes = { typeof(Course), typeof(Suffix) };
+        private readonly EventDispatcher _eventDispatcher;
         private readonly string _connectionString;
+        private readonly bool _useConsoleLogger;
 
         public DbSet<Student> Students { get; set; }
         public DbSet<Course> Courses { get; set; }
 
-        public SchoolContext(string connectionString, bool useConsoleLogger)
+        public SchoolContext(string connectionString, bool useConsoleLogger, EventDispatcher eventDispatcher)
         {
+            _eventDispatcher = eventDispatcher;
             _connectionString = connectionString;
             _useConsoleLogger = useConsoleLogger;
         }
@@ -49,11 +55,25 @@ namespace App
             {
                 x.ToTable("Student").HasKey(k => k.Id);
                 x.Property(p => p.Id).HasColumnName("StudentID");
-                x.Property(p => p.Email);
-                x.Property(p => p.Name);
+                x.Property(p => p.Email)
+                  .HasConversion(p => p.Value, p => Email.Create(p).Value);
+                x.OwnsOne(p => p.Name, p =>
+                {
+                    p.Property<long?>("NameSuffixID").HasColumnName("NameSuffixID");
+                    p.Property(pp => pp.First).HasColumnName("FirstName");
+                    p.Property(pp => pp.Last).HasColumnName("LastName");
+                    p.HasOne(pp => pp.Suffix).WithMany().HasForeignKey("NameSuffixID").IsRequired(false);
+                });
                 x.HasOne(p => p.FavoriteCourse).WithMany();
                 x.HasMany(p => p.Enrollments).WithOne(p => p.Student)
+                .OnDelete(DeleteBehavior.Cascade)
                 .Metadata.PrincipalToDependent.SetPropertyAccessMode(PropertyAccessMode.Field);
+            });
+            modelBuilder.Entity<Suffix>(x =>
+            {
+                x.ToTable("Suffix").HasKey(p => p.Id);
+                x.Property(p => p.Id).HasColumnName("SuffixID");
+                x.Property(p => p.Name);
             });
             modelBuilder.Entity<Course>(x =>
             {
@@ -69,6 +89,26 @@ namespace App
                    x.HasOne(p => p.Course).WithMany();
                    x.Property(p => p.Grade);
                });
+        }
+
+        public override int SaveChanges()
+        {
+            IEnumerable<EntityEntry> entries = ChangeTracker.Entries().Where(x => EnumerationTypes.Contains(x.Entity.GetType()));
+            foreach (EntityEntry entry in entries)
+            {
+                entry.State = EntityState.Unchanged;
+            }
+
+            List<Entity> entities = ChangeTracker.Entries().Where(x => x.Entity is Entity).Select(x => (Entity)x.Entity).ToList();
+
+            int result = base.SaveChanges();
+            foreach (Entity entity in entities)
+            {
+                _eventDispatcher.Dispatch(entity.DomainEvents);
+                entity.ClearDomainEvents();
+            }
+
+            return result;
         }
     }
 }
